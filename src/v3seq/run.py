@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Everything happens here."""
+
 
 import sys
 import os
@@ -20,7 +22,10 @@ cont_file = resource_filename(__name__, 'db/pol_sequences.fasta')
 
 
 def grouper(n, iterable, fillvalue=None):
-    "grouper(3, 'ABCDEFG', 'x') --> ABC DEF Gxx"
+    """Group an iteranle n elements at a time, from itertools examples.
+
+    grouper(3, 'ABCDEFG', 'x') --> ABC DEF Gxx
+    """
     from itertools import zip_longest
     args = [iter(iterable)] * n
     return zip_longest(fillvalue=fillvalue, *args)
@@ -95,7 +100,7 @@ def filter_reads(filename, max_n=100000, min_len=129):
 
 
 def blast_reads(read_group):
-    """Use blastx to align reads to V3 consensus"""
+    """Use blastx to align reads to V3 consensus."""
     SeqIO.write(read_group, 'tmp.fasta', 'fasta')
     cml = "blastx -task blastx-fast -query tmp.fasta -subject %s \
     -out out.tsv -num_alignments 1 -evalue 1E-4 \
@@ -125,10 +130,10 @@ def main(filein, min_reads=50):
     covering_reads = set([])
     logging.info('blast reads in batches until enough are found')
     for i, group in enumerate(grouper(500, no_pol_reads)):
-        print('blast call %d' % i)
+        logging.info('blast call %d', i + 1)
         _ = blast_reads(group)
         covering_reads.update(_)
-        print('covering_reads now %d' % len(covering_reads))
+        logging.info('covering_reads found so far: %d', len(covering_reads))
         if len(covering_reads) >= min_reads:
             break
 
