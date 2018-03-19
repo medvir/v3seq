@@ -57,5 +57,5 @@ def main(args=None):
     logging.basicConfig(filename='v3seq.log', level=logging.INFO, format=log_format, datefmt='%Y/%m/%d %H:%M:%S')
     logging.info(' '.join(sys.argv))
 
-    from v3seq import prepare
-    prepare.main(args.f)
+    from v3seq import run
+    run.main(args.f)
