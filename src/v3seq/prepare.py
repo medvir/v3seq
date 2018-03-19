@@ -17,7 +17,7 @@ d2a = {'AG': 'R', 'CT': 'Y', 'AC': 'M', 'GT': 'K', 'CG': 'S', 'AT': 'W',
 
 cons_file = resource_filename(__name__, 'db/v3cons.faa')
 cont_file = resource_filename(__name__, 'db/pol_sequences.fasta')
-print(cont_file)
+
 
 def grouper(n, iterable, fillvalue=None):
     "grouper(3, 'ABCDEFG', 'x') --> ABC DEF Gxx"
@@ -80,14 +80,13 @@ def remove_matching_reads(filename, contaminant_file):
     if not os.path.exists(cont_file + '.bwt'):
         cml = shlex.split('bwa index %s' % cont_file)
         subprocess.call(cml)
-    cml = 'bwa mem -t 2 %s %s | samtools view -f 4 -h | samtools bam2fq - | seqtk seq -A - > clean_reads.fasta' % (contaminant_file, filename)
+    cml = 'bwa mem -t 2 %s %s | samtools view -f 4 -h - | samtools bam2fq - | seqtk seq -A - > clean_reads.fasta' % (contaminant_file, filename)
     subprocess.call(cml, shell=True)
     return 'clean_reads.fasta'
 
 
 def filter_reads(filename, max_n=100000, min_len=129):
     """Use seqtk and Biopython to trim and filter low quality reads."""
-
     # run seqtk trimfq to trim low quality ends
     logging.info('Trimming reads with seqtk')
     r1 = 'seqtk trimfq %s | seqtk sample - %d | seqtk seq -L %d - > high_quality.fastq' % (filename, max_n, min_len)
@@ -116,8 +115,10 @@ def blast_reads(read_group):
 
 def main(filein, min_reads=50):
     """What the main does."""
+    assert os.path.exists(filein)
     logging.info('obtain high quality reads')
     hq = filter_reads(filein)
+    logging.info('remove matching reads')
     no_pol = remove_matching_reads(hq, cont_file)
     no_pol = 'clean_reads.fasta'
     no_pol_reads = SeqIO.parse(no_pol, 'fasta')
@@ -148,7 +149,7 @@ def main(filein, min_reads=50):
     cons_seq = df_2_ambiguous_sequence(df)
     SeqIO.write([SeqRecord(Seq(cons_seq), id='v3_consensus', description='')], 'v3cons.fasta', 'fasta')
 
-    for f in ['high_quality.fasta', 'out.fasta', 'revout.fasta', 'clean_reads.fasta']:
+    for f in ['high_quality.fastq', 'out.fasta', 'revout.fasta', 'clean_reads.fasta']:
         os.remove(f)
 
 if __name__ == '__main__':
