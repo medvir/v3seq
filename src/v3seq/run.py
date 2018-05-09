@@ -49,6 +49,9 @@ def msa_2_df(filename):
         if c['-'] < 5:
             j2 = j
             break
+    window = msa[:, j1:j2 + 1]
+    haplos = Counter((str(window[i, :].seq) for i in range(m)))
+
     pos = []
     nt = []
     freq = []
@@ -58,7 +61,7 @@ def msa_2_df(filename):
             nt.append(b)
             freq.append(float(counts) / m)
     df = pd.DataFrame({'pos': pos, 'nt': nt, 'freq': freq})
-    return df
+    return df, haplos
 
 
 def df_2_ambiguous_sequence(df_in):  # , cov_df=None):
@@ -120,7 +123,7 @@ def blast_reads(read_group):
     covering.loc[:, 'qseqid'] = value
     return covering.qseqid.tolist()
 
-def main(filein, min_reads=50):
+def main(filein, min_reads=500):
     """What the main does."""
     assert os.path.exists(filein)
     logging.info('obtain high quality reads')
@@ -152,12 +155,23 @@ def main(filein, min_reads=50):
     subprocess.call('cat out.fasta revout.fasta > v3reads.fasta', shell=True)
     cml = shlex.split('muscle -in v3reads.fasta -out msa.fasta -quiet')
     subprocess.call(cml)
-    df = msa_2_df('msa.fasta')
+
+    df, haplotypes = msa_2_df('msa.fasta')
     cons_seq = df_2_ambiguous_sequence(df)
     SeqIO.write([SeqRecord(Seq(cons_seq), id='v3_consensus', description='')], 'v3cons.fasta', 'fasta')
-
+    haps = []
+    hi = 1
+    tot_reads = df.freq.sum()
+    for h, support in haplotypes.items():
+        f = round(float(support) / tot_reads, 2)
+        sr = SeqRecord(Seq(h), id='v3_haplotype_%d-support_%3.2f' % (hi, f), description='')
+        haps.append(sr)
+        hi += 1
+    SeqIO.write(haps, 'haplotypes.fasta', 'fasta')
     for f in ['high_quality.fastq', 'out.fasta', 'revout.fasta', 'clean_reads.fasta']:
         os.remove(f)
 
 if __name__ == '__main__':
-    main(sys.argv[1])
+    msa_2_df('msa.fasta')
+
+    #main(sys.argv[1])
