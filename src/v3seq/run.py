@@ -72,7 +72,8 @@ def df_2_ambiguous_sequence(df_in):  # , cov_df=None):
     # aggregate calls for the same position
     all_nt = df_in.groupby(['pos']).agg({'nt': lambda x: ''.join(sorted(x))})
     # create a columng of ambiguous bases
-    all_nt['ambi'] = all_nt.apply(lambda row: d2a.get(row['nt'], row['nt'][0]), axis=1)
+    value = all_nt.apply(lambda row: d2a.get(row['nt'], row['nt'][0]), axis=1)
+    all_nt.loc[:, 'ambi'] = value
     all_nt.reset_index(inplace=True)
     # if not cov_df is None:
     #     full_df = pd.merge(all_nt, cov_df, on='pos', how='left')
@@ -114,8 +115,9 @@ def blast_reads(read_group):
     covering = als[als.send - als.sstart > 33]
     if covering.empty:
         return []
-    covering['qseqid'] = covering.apply(
+    value = covering.apply(
         lambda x: x['qseqid'] if x['qstart'] < x['qend'] else str(x['qseqid']) + ':REV', axis=1)
+    covering.loc[:, 'qseqid'] = value
     return covering.qseqid.tolist()
 
 def main(filein, min_reads=50):
