@@ -103,9 +103,9 @@ def remove_matching_reads(filename, contaminant_file):
 
 
 def filter_reads(filename, max_n=100000, min_len=129):
-    """Use seqtk and Biopython to trim and filter low quality reads."""
+    """Use seqtk to trim, subsample, filter short reads."""
     # run seqtk trimfq to trim low quality ends
-    logging.info('Trimming reads with seqtk')
+    logging.info('Trimming reads with seqtk, subsample, and delete reads shorter than %d', min_len)
     r1 = 'seqtk trimfq %s | seqtk sample - %d | seqtk seq -L %d - > high_quality.fastq' % (filename, max_n, min_len)
     subprocess.call(r1, shell=True, universal_newlines=True)
     return 'high_quality.fastq'
@@ -151,12 +151,12 @@ def blast_reads(read_group):
     value = covering.apply(
         lambda x: x['qseqid'] if x['qstart'] < x['qend'] else str(x['qseqid']) + ':REV', axis=1)
     covering.loc[:, 'qseqid'] = value
+    logging.info('Found %d covering reads', covering.shape[0])
     return covering.qseqid.tolist()
 
 def main(filein, min_reads=500, n_group=2000):
     """What the main does."""
     assert os.path.exists(filein)
-    logging.info('obtain high quality reads')
     hq = filter_reads(filein)
     logging.info('remove matching reads')
     no_pol = remove_matching_reads(hq, cont_file)
@@ -170,9 +170,10 @@ def main(filein, min_reads=500, n_group=2000):
         _ = blast_reads(group)
         covering_reads.update(_)
         total_blasted += n_group
-        logging.debug('%d covering reads out of %d blasted - %3.2f %%', len(_), n_group, 100 * float(len(_)) / n_group)
-        logging.debug('covering_reads found so far: %d out of %d total - %3.2f %%', len(covering_reads), total_blasted,
-                      100 * float(len(covering_reads)) / total_blasted)
+        logging.info('this blast: %d covering  out of %d total - %3.2f %%', len(_), n_group,
+                     100 * float(len(_)) / n_group)
+        logging.info('cumulative: %d covering  out of %d total - %3.2f %%', len(covering_reads), total_blasted,
+                     100 * float(len(covering_reads)) / total_blasted)
         if len(covering_reads) >= min_reads:
             break
 
