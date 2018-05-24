@@ -7,6 +7,8 @@ import os
 import shlex
 import logging
 import subprocess
+import re
+
 import pandas as pd
 
 from Bio import SeqIO, AlignIO
@@ -106,7 +108,7 @@ def filter_reads(filename, max_n=100000, min_len=129):
     """Use seqtk to trim, subsample, filter short reads."""
     # run seqtk trimfq to trim low quality ends
     logging.info('Trimming reads with seqtk, subsample, and delete reads shorter than %d', min_len)
-    r1 = 'seqtk trimfq %s | seqtk sample - %d | seqtk seq -L %d - > high_quality.fastq' % (filename, max_n, min_len)
+    r1 = 'seqtk trimfq %s | seqtk seq -L %d | seqtk sample - %d > high_quality.fastq' % (filename, min_len, max_n)
     subprocess.call(r1, shell=True, universal_newlines=True)
     return 'high_quality.fastq'
 
@@ -140,6 +142,7 @@ def blast_reads(read_group):
 
     subprocess.call('rm tmp.fasta splitted_clean_*fasta', shell=True)
     subprocess.call('cat tmp*.tsv > out.tsv', shell=True)
+
     subprocess.call('rm tmp*.tsv', shell=True)
     als = pd.read_table('out.tsv', header=None,
                         names=['qseqid', 'sseqid', 'pident', 'qcovs', 'score', 'length', 'mismatch', 'gapopen',
@@ -149,19 +152,41 @@ def blast_reads(read_group):
     if covering.empty:
         return []
     value = covering.apply(
-        lambda x: x['qseqid'] if x['qstart'] < x['qend'] else str(x['qseqid']) + ':REV', axis=1)
+        lambda x: '%s:FWD:%d:%d' % (x['qseqid'], x['qstart'], x['qend']) if x['qstart'] < x['qend'] else
+        '%s:REV:%d:%d' % (x['qseqid'], x['qend'], x['qstart']), axis=1)
     covering.loc[:, 'qseqid'] = value
     logging.info('Found %d covering reads', covering.shape[0])
     return covering.qseqid.tolist()
 
+
+def extract_reads(reads_list, reads_file):
+    """Extract reads from reads_file according to id:orientation:start:end in reads_list."""
+    all_reads = SeqIO.to_dict(SeqIO.parse(reads_file, 'fasta'))
+    save_reads = []
+    n1 = n2 = 0
+    for read_info in reads_list:
+        sid, orientation, start, end = re.search(r'(.*):([A-Z]{3}):(\d*):(\d*)$', read_info).group(1, 2, 3, 4)
+        if orientation == 'FWD':
+            save_reads.append(all_reads[sid][int(start) - 1:int(end)])
+            n1 += 1
+        elif orientation == 'REV':
+            rh = SeqRecord(all_reads[sid][int(start) - 1:int(end)].seq.reverse_complement(),
+                           id=sid + ':REV', description='')
+            save_reads.append(rh)
+            n2 += 1
+    return save_reads, n1, n2
+
+
 def main(filein, min_reads=500, n_group=2000):
     """What the main does."""
+    from random import sample
     assert os.path.exists(filein)
     hq = filter_reads(filein)
     logging.info('remove matching reads')
     no_pol = remove_matching_reads(hq, cont_file)
-    no_pol = 'clean_reads.fasta'
-    no_pol_reads = SeqIO.parse(no_pol, 'fasta')
+    # no_pol = 'clean_reads.fasta'
+    no_pol_reads = list(SeqIO.parse(no_pol, 'fasta'))
+    no_pol_reads = sample(no_pol_reads, k=len(no_pol_reads))
     covering_reads = set([])
     logging.info('blast reads in batches until enough are found')
     total_blasted = 0
@@ -179,17 +204,15 @@ def main(filein, min_reads=500, n_group=2000):
 
     logging.info('covering_reads used in MSA: %d out of %d blasted (%3.2f %%)', len(covering_reads), total_blasted,
                  100 * float(len(covering_reads)) / total_blasted)
-    cr = [s for s in SeqIO.parse(no_pol, 'fasta') if s.id in covering_reads]
-    n1 = SeqIO.write(cr, 'out.fasta', 'fasta')
-    logging.info('%d covering reads in forward orientation', n1)
-    crev = [SeqRecord(s.seq.reverse_complement(), s.id, description='reversed') for s in SeqIO.parse(no_pol, 'fasta') \
-            if '%s:REV' % s.id in covering_reads]
-    n2 = SeqIO.write(crev, 'revout.fasta', 'fasta')
-    logging.info('%d covering reads in reverse orientation', n2)
-    if n1 + n2 < min_reads:
-        logging.error('Not enough reads: %d', n1 + n2)
-        sys.exit('Not enough reads: %d' % (n1 + n2))
-    subprocess.call('cat out.fasta revout.fasta > v3reads.fasta', shell=True)
+    cov_reads, n_fwd, n_rev = extract_reads(covering_reads, no_pol)
+
+    SeqIO.write(cov_reads, 'v3reads.fasta', 'fasta')
+    logging.info('%d covering reads in forward orientation', n_fwd)
+    logging.info('%d covering reads in reverse orientation', n_rev)
+    if n_fwd + n_rev < min_reads:
+        logging.error('Not enough reads: %d', n_fwd + n_rev)
+        sys.exit('Not enough reads: %d' % (n_fwd + n_rev))
+
     cml = shlex.split('muscle -in v3reads.fasta -out msa.fasta -quiet')
     subprocess.call(cml)
 
@@ -210,7 +233,7 @@ def main(filein, min_reads=500, n_group=2000):
         hi += 1
     logging.info('Total frequency of haplotypes below 5%%: %f', 1 - accounted_f)
     SeqIO.write(haps, 'haplotypes.fasta', 'fasta')
-    for f in ['high_quality.fastq', 'out.fasta', 'revout.fasta', 'clean_reads.fasta']:
+    for f in ['high_quality.fastq', 'clean_reads.fasta']:
         os.remove(f)
     logging.info('Haplotypes written to haplotypes.fasta')
 
