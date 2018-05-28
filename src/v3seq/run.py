@@ -8,6 +8,7 @@ import shlex
 import logging
 import subprocess
 import re
+from collections import Counter
 
 import pandas as pd
 
@@ -39,38 +40,33 @@ def grouper(n, iterable, fillvalue=None):
 
 
 def msa_2_df(filename):
-    """Take a MSA in fasta format and return:
+    """Take a MSA in fasta format where headers are like read_10-count_15 and return:
        - a data frame with position, nucleotide, frequencies;
        - a Counter with haplotypes."""
-    from collections import Counter
     msa = AlignIO.read(filename, 'fasta')
-    m = len(msa)  # rows, number of sequences
     n = msa.get_alignment_length()  # columns, number of positions
-    j1 = 0
-    j2 = n
-    for j in range(n):
-        c = Counter(msa[:, j])
-        if c['-'] < 5:
-            j1 = j
-            break
-    for j in range(n - 1, -1, -1):
-        c = Counter(msa[:, j])
-        if c['-'] < 5:
-            j2 = j
-            break
-    window = msa[:, j1:j2 + 1]
-    haplos = Counter((str(window[i, :].seq) for i in range(m)))
-
     pos = []
     nt = []
     freq = []
-    for j in range(j1, j2):
-        for b, counts in Counter(msa[:, j]).items():
+    for j in range(n):  # iterate over columns
+        tmp_nt = []
+        for i, seq in enumerate(msa):
+            read_count = int(seq.id.split('_')[-1])  # extract count from seq.id
+            tmp_nt.extend([msa[i, j]] * read_count)  # add as many nt as needed
+        for b, counts in Counter(tmp_nt).items():
             pos.append(j)
             nt.append(b)
-            freq.append(float(counts) / m)
+            freq.append(float(counts) / len(tmp_nt))
     df = pd.DataFrame({'pos': pos, 'nt': nt, 'freq': freq})
-    return df, haplos
+
+    all_reads = []
+    for s in msa:
+        read_count = int(s.id.split('_')[-1])
+        all_reads.extend([str(s.seq)] * read_count)
+
+    haplos = Counter(all_reads)
+
+    return df, haplos, len(tmp_nt)
 
 
 def df_2_ambiguous_sequence(df_in):  # , cov_df=None):
@@ -98,7 +94,7 @@ def remove_matching_reads(filename, contaminant_file):
     if not os.path.exists(cont_file + '.bwt'):
         cml = shlex.split('bwa index %s' % cont_file)
         subprocess.call(cml)
-    cml = 'bwa mem -t 2 %s %s | samtools view -f 4 -h - | samtools bam2fq - | seqtk seq -A - > clean_reads.fasta' % \
+    cml = 'bwa mem -t 2 %s %s 2> /dev/null | samtools view -f 4 -h - | samtools bam2fq - | seqtk seq -A - > clean_reads.fasta' % \
         (contaminant_file, filename)
     subprocess.call(cml, shell=True)
     return 'clean_reads.fasta'
@@ -115,8 +111,10 @@ def filter_reads(filename, max_n=100000, min_len=129):
 
 def blast_reads(read_group):
     """Use blastx to align reads to V3 consensus."""
-    tot_seqs = SeqIO.write(read_group, 'tmp.fasta', 'fasta')
-
+    try:
+        tot_seqs = SeqIO.write(read_group, 'tmp.fasta', 'fasta')
+    except AttributeError:  # captures when last read_group is filled with None at the end
+        return []
     max_n = (tot_seqs / n_proc) + 1
     # We want to split in n_proc processors, so each file has at most
     # (tot_seqs / n_proc) + 1 reads
@@ -167,17 +165,19 @@ def extract_reads(reads_list, reads_file):
     for read_info in reads_list:
         sid, orientation, start, end = re.search(r'(.*):([A-Z]{3}):(\d*):(\d*)$', read_info).group(1, 2, 3, 4)
         if orientation == 'FWD':
-            save_reads.append(all_reads[sid][int(start) - 1:int(end)])
+            save_reads.append(str(all_reads[sid][int(start) - 1:int(end)].seq))
             n1 += 1
         elif orientation == 'REV':
-            rh = SeqRecord(all_reads[sid][int(start) - 1:int(end)].seq.reverse_complement(),
-                           id=sid + ':REV', description='')
+            rh = str(all_reads[sid][int(start) - 1:int(end)].seq.reverse_complement())
             save_reads.append(rh)
             n2 += 1
-    return save_reads, n1, n2
+    count_reads = Counter(save_reads)
+    sr = [SeqRecord(Seq(read), id='read_%d-count_%d' % (i, count), description='') \
+          for i, (read, count) in enumerate(count_reads.items())]
+    return sr, n1, n2
 
 
-def main(filein, min_reads=500, n_group=2000):
+def main(filein, min_reads=150, n_group=2000):
     """What the main does."""
     from random import sample
     assert os.path.exists(filein)
@@ -191,6 +191,8 @@ def main(filein, min_reads=500, n_group=2000):
     logging.info('blast reads in batches until enough are found')
     total_blasted = 0
     for i, group in enumerate(grouper(n_group, no_pol_reads)):
+        if i > 2 and len(covering_reads) < 20:
+            sys.exit('not enough reads covering V3 were found')
         logging.info('blast call %d', i + 1)
         _ = blast_reads(group)
         covering_reads.update(_)
@@ -213,25 +215,29 @@ def main(filein, min_reads=500, n_group=2000):
         logging.error('Not enough reads: %d', n_fwd + n_rev)
         sys.exit('Not enough reads: %d' % (n_fwd + n_rev))
 
-    cml = shlex.split('muscle -in v3reads.fasta -out msa.fasta -quiet')
+    no_singleton_reads = [s for s in SeqIO.parse('v3reads.fasta', 'fasta') if int(s.id.split('_')[-1]) > 1]
+    SeqIO.write(no_singleton_reads, 'v3reads_no_singleton.fasta', 'fasta')
+
+    cml = shlex.split('muscle -in v3reads_no_singleton.fasta -out msa.fasta -quiet')
     subprocess.call(cml)
 
-    df, haplotypes = msa_2_df('msa.fasta')
+    df, haplotypes, support = msa_2_df('msa.fasta')
+    logging.info('Haplotypes supported by %d reads out of %d: %3.1f%%',
+                 support, n_fwd + n_rev, 100.0 * support / (n_fwd + n_rev))
     cons_seq = df_2_ambiguous_sequence(df)
     SeqIO.write([SeqRecord(Seq(cons_seq), id='v3_consensus', description='')], 'v3cons.fasta', 'fasta')
+
     haps = []
     hi = 1  # counter for haplotypes, used in fasta file
     accounted_f = 0.0  # keep track of the cumulative accounted frequency
     tot_reads = sum(haplotypes.values())
     for h, support in haplotypes.most_common():
         f = round(float(support) / tot_reads, 2)
-        if f < 0.05:
-            break
         accounted_f += f
         sr = SeqRecord(Seq(h), id='v3_haplotype_%d-support_%3.2f' % (hi, f), description='')
         haps.append(sr)
         hi += 1
-    logging.info('Total frequency of haplotypes below 5%%: %f', 1 - accounted_f)
+
     SeqIO.write(haps, 'haplotypes.fasta', 'fasta')
     for f in ['high_quality.fastq', 'clean_reads.fasta']:
         os.remove(f)
