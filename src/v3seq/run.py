@@ -29,6 +29,7 @@ except NotImplementedError:
     n_proc = 2
 logging.info('%d cores that will be used', n_proc)
 
+
 def grouper(n, iterable, fillvalue=None):
     """Group an iteranle n elements at a time, from itertools examples.
 
@@ -89,13 +90,14 @@ def df_2_ambiguous_sequence(df_in):  # , cov_df=None):
     return ''.join(all_nt.ambi.tolist())
 
 
-def remove_matching_reads(filename, contaminant_file):
-    """Remove reads with matches anything in contaminant_file."""
+def remove_matching_reads(filename, cont_file):
+    """Remove reads with matches anything in cont_file."""
     if not os.path.exists(cont_file + '.bwt'):
         cml = shlex.split('bwa index %s' % cont_file)
         subprocess.call(cml)
-    cml = 'bwa mem -t 2 %s %s 2> /dev/null | samtools view -f 4 -h - | samtools bam2fq - | seqtk seq -A - > clean_reads.fasta' % \
-        (contaminant_file, filename)
+    cml = 'bwa mem -t 2 %s %s 2> /dev/null | samtools view -f 4 -h - | samtools bam2fq - ' % (cont_file, filename)
+    cml += '| seqtk seq -A - > clean_reads.fasta'
+
     subprocess.call(cml, shell=True)
     return 'clean_reads.fasta'
 
@@ -146,7 +148,8 @@ def blast_reads(read_group):
                         names=['qseqid', 'sseqid', 'pident', 'qcovs', 'score', 'length', 'mismatch', 'gapopen',
                                'qstart', 'qend', 'sstart', 'send'])
     os.remove('out.tsv')
-    covering = als[als.send - als.sstart > 33]
+    covering = als.copy()
+    covering = covering[(covering.send - covering.sstart > 33)]
     if covering.empty:
         return []
     value = covering.apply(
@@ -172,7 +175,7 @@ def extract_reads(reads_list, reads_file):
             save_reads.append(rh)
             n2 += 1
     count_reads = Counter(save_reads)
-    sr = [SeqRecord(Seq(read), id='read_%d-count_%d' % (i, count), description='') \
+    sr = [SeqRecord(Seq(read), id='read_%d-count_%d' % (i, count), description='')
           for i, (read, count) in enumerate(count_reads.items())]
     return sr, n1, n2
 
@@ -242,6 +245,7 @@ def main(filein, min_reads=150, n_group=2000):
     for f in ['high_quality.fastq', 'clean_reads.fasta']:
         os.remove(f)
     logging.info('Haplotypes written to haplotypes.fasta')
+
 
 if __name__ == '__main__':
     main(sys.argv[1])

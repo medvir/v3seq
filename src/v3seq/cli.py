@@ -15,10 +15,9 @@ Why does this file exist, and why not put this in __main__?
   Also see (1) from http://click.pocoo.org/5/setuptools/#setuptools-integration
 """
 import argparse
-import os
 import sys
 
-from pkg_resources import (get_distribution, DistributionNotFound, resource_exists)
+from pkg_resources import (get_distribution, DistributionNotFound)
 
 try:
     __version__ = get_distribution('v3seq').version
