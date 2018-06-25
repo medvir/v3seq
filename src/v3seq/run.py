@@ -241,7 +241,7 @@ def main(filein, min_reads=150, n_group=2000):
         haps.append(sr)
         hi += 1
 
-    SeqIO.write(haps, 'haplotypes.fasta', 'fasta')
+    SeqIO.write(haps, 'v3haplotypes.fasta', 'fasta')
     for f in ['high_quality.fastq', 'clean_reads.fasta']:
         os.remove(f)
     logging.info('Haplotypes written to haplotypes.fasta')
