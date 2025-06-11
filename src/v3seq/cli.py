@@ -17,12 +17,9 @@ Why does this file exist, and why not put this in __main__?
 import argparse
 import sys
 
-from pkg_resources import (get_distribution, DistributionNotFound)
+from importlib.metadata import version
 
-try:
-    __version__ = get_distribution('v3seq').version
-except DistributionNotFound:
-    __version__ = 'unknown'
+__version__ = version('v3seq')
 
 files_to_remove = []
 

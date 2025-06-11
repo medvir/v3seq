@@ -106,7 +106,7 @@ def filter_reads(filename, max_n=100000, min_len=129):
     """Use seqtk to trim, subsample, filter short reads."""
     # run seqtk trimfq to trim low quality ends
     logging.info('Trimming reads with seqtk, subsample, and delete reads shorter than %d', min_len)
-    r1 = 'seqtk trimfq %s | seqtk seq -L %d | seqtk sample - %d > high_quality.fastq' % (filename, min_len, max_n)
+    r1 = 'seqtk trimfq %s | seqtk seq -L %d - | seqtk sample - %d > high_quality.fastq' % (filename, min_len, max_n)
     subprocess.call(r1, shell=True, universal_newlines=True)
     return 'high_quality.fastq'
 
