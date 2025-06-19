@@ -221,7 +221,7 @@ def main(filein, min_reads=150, n_group=2000):
     no_singleton_reads = [s for s in SeqIO.parse('v3reads.fasta', 'fasta') if int(s.id.split('_')[-1]) > 1]
     SeqIO.write(no_singleton_reads, 'v3reads_no_singleton.fasta', 'fasta')
 
-    cml = shlex.split('muscle -in v3reads_no_singleton.fasta -out msa.fasta -quiet')
+    cml = shlex.split('muscle -align v3reads_no_singleton.fasta -output msa.fasta -quiet')
     subprocess.call(cml)
 
     df, haplotypes, support = msa_2_df('msa.fasta')
